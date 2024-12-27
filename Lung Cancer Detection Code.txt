@@ -1,0 +1,253 @@
+%% Lung cancer segentation using unet and classification using Convnet
+% Load the lung images and masks
+lung_images_dir = 'I'; % Directory containing lung images
+lung_masks_dir = 'M'; % Directory containing corresponding masks
+
+lung_images = imageDatastore(lung_images_dir);
+lung_masks = imageDatastore(lung_masks_dir);
+
+% Define the U-Net architecture
+inputSize = [64 64 1];
+numClasses = 1;
+
+% Define the layers for the encoder
+encoderDepth = 3;
+encoderLayers = [
+    imageInputLayer(inputSize, 'Name', 'input', 'Normalization', 'none')
+    convolution2dLayer(3, 64, 'Padding', 'same', 'Name', 'conv1_1')
+    reluLayer('Name', 'relu1_1')
+    convolution2dLayer(3, 64, 'Padding', 'same', 'Name', 'conv1_2')
+    reluLayer('Name', 'relu1_2')
+    maxPooling2dLayer(2, 'Stride', 2, 'Name', 'pool1')
+    convolution2dLayer(3, 128, 'Padding', 'same', 'Name', 'conv2_1')
+    reluLayer('Name', 'relu2_1')
+    convolution2dLayer(3, 128, 'Padding', 'same', 'Name', 'conv2_2')
+    reluLayer('Name', 'relu2_2')
+    maxPooling2dLayer(2, 'Stride', 2, 'Name', 'pool2')
+    % Add more convolutional blocks as needed
+];
+
+% Define the bridge layer
+bridgeLayers = [
+    convolution2dLayer(3, 256, 'Padding', 'same', 'Name', 'conv_bridge1')
+    reluLayer('Name', 'relu_bridge1')
+    convolution2dLayer(3, 256, 'Padding', 'same', 'Name', 'conv_bridge2')
+    reluLayer('Name', 'relu_bridge2')
+    transposedConv2dLayer(2, 128, 'Stride', 2, 'Cropping', 'same', 'Name', 'transConv_bridge')
+];
+
+% Define the layers for the decoder
+decoderLayers = [
+    concatenationLayer(3, 2, 'Name', 'concat1') % Adjust the concatenation dimension
+    convolution2dLayer(3, 128, 'Padding', 'same', 'Name', 'conv3_1')
+    reluLayer('Name', 'relu3_1')
+    convolution2dLayer(3, 128, 'Padding', 'same', 'Name', 'conv3_2')
+    reluLayer('Name', 'relu3_2')
+    transposedConv2dLayer(2, 64, 'Stride', 2, 'Cropping', 'same', 'Name', 'transConv1')
+    concatenationLayer(3, 2, 'Name', 'concat2') % Adjust the concatenation dimension
+    convolution2dLayer(3, 64, 'Padding', 'same', 'Name', 'conv4_1')
+    reluLayer('Name', 'relu4_1')
+    convolution2dLayer(3, numClasses, 'Padding', 'same', 'Name', 'conv4_2')
+    softmaxLayer('Name', 'softmax')
+    pixelClassificationLayer('Name', 'output')
+];
+
+% Combine encoder, bridge, and decoder layers
+layers = [
+    encoderLayers;
+    bridgeLayers;
+    decoderLayers
+];
+
+% Define U-Net training options
+options = trainingOptions('adam', ...
+    'InitialLearnRate', 1e-3, ...
+    'MaxEpochs', 2, ...
+    'MiniBatchSize', 8, ...
+    'Shuffle', 'every-epoch', ...
+    'Plots', 'training-progress', ...
+    'Verbose', true);
+lgraph = layerGraph(layers);
+figure(25)
+plot(lgraph)
+% Combine lung images and masks into a single datastore
+lung_training_data = combine(lung_images, lung_masks);
+
+
+% % Step 2: Preprocessing
+% lung_image_enhanced = histeq(lung_image);
+% median_filtered_image = medfilt2(lung_image_enhanced);
+% 
+% % Step 3: Thresholding
+% threshold_value = graythresh(median_filtered_image);
+% binary_image = imbinarize(median_filtered_image, threshold_value);
+% 
+% % Step 4: Morphological Operations
+% se = strel('disk', 5);
+% lung_mask_dilated = imdilate(binary_image, se);
+% lung_mask_eroded = imerode(lung_mask_dilated, se);
+% 
+% % Step 5: Connected Component Analysis (Optional)
+% lung_segmented = bwlabel(lung_mask_eroded);
+% stats = regionprops(lung_segmented, 'Area');
+% area_thresh = 1000; % Define a threshold for minimum area
+% for i = 1:length(stats)
+%     if stats(i).Area < area_thresh
+%         lung_mask_eroded(lung_segmented == i) = 0;
+%     end
+% end
+% 
+% % Step 6: Visualization
+% figure(2);
+% subplot(1, 2, 1);
+% imshow(lung_image);
+% title('Original Lung Image');
+% subplot(1, 2, 2);
+% imshow(lung_mask_eroded);
+% title('Segmented Lungs');
+
+% Step 7: Save or Further Analysis
+% imwrite(lung_mask_eroded, 'segmented_lungs.jpg');
+
+% Step 1: Read the Image and Mask
+[filename2, Pathname2] = uigetfile('.','Select a lung image');
+lung_image1 = imread(fullfile(Pathname2, filename2));
+figure(1), subplot(1,2,1), imshow(lung_image1), title('Original Lung Image')
+
+[filename1, Pathname1] = uigetfile('.','Select a mask image');
+lung_mask = imread(fullfile(Pathname1, filename1));
+subplot(1,2,2), imshow(lung_mask), title('Original Mask')
+
+% Step 2: Preprocessing
+% Enhance contrast using histogram equalization
+lung_image_enhanced = histeq(lung_image1);
+% Step 3: Thresholding
+threshold_value = graythresh(lung_image_enhanced);
+binary_image = imbinarize(lung_image_enhanced, threshold_value);
+
+% Step 4: Masking
+lung_image_masked = lung_image_enhanced .* uint8(lung_mask > 0);
+
+% Step 5: Extracting Lung Regions
+extracted_lung_image = lung_image_masked;
+extracted_lung_mask = lung_mask;
+
+% Step 6: Visualization
+figure(3);
+subplot(1, 2, 1);
+imshow(extracted_lung_image);
+title('Extracted Lung from Image');
+subplot(1, 2, 2);
+imshow(extracted_lung_mask);
+title('Extracted Lung Nodule ');
+
+
+gpuDevice(1)
+%% classification
+% dataset assisgn
+imds = imageDatastore('dataset',...
+    'IncludeSubfolders',true,... 
+    'LabelSource','foldernames');
+%% dataset splitting 80% trainig 20% testing
+[Data,testData]= splitEachLabel(imds,0.8,'randomize');
+% Training files 
+[trainData] =Data;
+layers = [
+    imageInputLayer([32 32 3],'Name','input')
+    convolution2dLayer(5,16,'Padding','same','Name','conv_1')
+    batchNormalizationLayer('Name','BN_1')
+    reluLayer('Name','relu_1')
+    convolution2dLayer(3,32,'Padding','same','Stride',2,'Name','conv_2')
+    batchNormalizationLayer('Name','BN_2')
+    reluLayer('Name','relu_2')
+    convolution2dLayer(3,32,'Padding','same','Name','conv_3')
+    batchNormalizationLayer('Name','BN_3')
+    reluLayer('Name','relu_3')
+       convolution2dLayer(3,32,'Padding','same','Name','conv_4')
+     batchNormalizationLayer('Name','BN_4')
+     reluLayer('Name','relu_4')
+%     
+    additionLayer(2,'Name','add')
+    averagePooling2dLayer(2,'Stride',3,'Name','avpool')
+    fullyConnectedLayer(2,'Name','fc')
+    softmaxLayer('Name','softmax')
+    classificationLayer('Name','classOutput')];
+% Create a layer graph from the layer array. layerGraph connects all the layers in layers sequentially. Plot the layer graph.
+lgraph = layerGraph(layers);
+figure
+plot(lgraph)
+% Create the 1-by-1 convolutional layer and add it to the layer graph. Specify the number of convolutional filters and the stride so that the activation size matches the activation size of the 'relu_3' layer. This arrangement enables the addition layer to add the outputs of the 'skipConv' and 'relu_3' layers. To check that the layer is in the graph, plot the layer graph.
+skipConv = convolution2dLayer(2,32,'Stride',2,'Name','skipConv');
+lgraph = addLayers(lgraph,skipConv);
+figure
+plot(lgraph)
+% Create the shortcut connection from the 'relu_1' layer to the 'add' layer. Because you specified two as the number of inputs to the addition layer when you created it, the layer has two inputs named 'in1' and 'in2'. The 'relu_3' layer is already connected to the 'in1' input. Connect the 'relu_1' layer to the 'skipConv' layer and the 'skipConv' layer to the 'in2' input of the 'add' layer. The addition layer now sums the outputs of the 'relu_3' and 'skipConv' layers. To check that the layers are connected correctly, plot the layer graph.
+lgraph = connectLayers(lgraph,'relu_1','skipConv');
+%lgraph = connectLayers(lgraph,'skipConv','add/in2');
+  lgraph = connectLayers(lgraph,'skipConv','add/in2');
+figure
+plot(lgraph);
+options1 = trainingOptions('adam', ...
+    'MiniBatchSize',64, ...
+    'MaxEpochs',25, ... % was 6
+    'ValidationFrequency',5, ...
+    'InitialLearnRate',1e-4,'Plots','training-progress');
+%% network training 
+ [convnet, traininfo] = trainNetwork(trainData,lgraph,options1);
+ analyzeNetwork(convnet);
+ % Step 1: Read the Input Image
+[filename, Pathname] = uigetfile('.','Select a lung image');
+lung_image = imread(fullfile(Pathname, filename));
+figure(1), imshow(lung_image), title('Original Lung Image');
+%% Done classification 
+     class = classify(convnet,lung_image);
+     msgbox(char(class))
+     % Save results to .mat file
+save('lung_cancer_results.mat', 'convnet', 'traininfo');
+% After training the network, you can evaluate its performance on the test data
+predictedLabels = classify(convnet, testData);
+actualLabels = testData.Labels;
+
+% Calculate confusion matrix
+confMat = confusionmat(actualLabels, predictedLabels);
+
+% Calculate precision, recall, and F1 score
+numClasses = size(confMat, 1);
+precision = zeros(numClasses, 1);
+recall = zeros(numClasses, 1);
+f1Score = zeros(numClasses, 1);
+
+for i = 1:numClasses
+    truePositives = confMat(i, i);
+    falsePositives = sum(confMat(:, i)) - truePositives;
+    falseNegatives = sum(confMat(i, :)) - truePositives;
+
+    precision(i) = truePositives / (truePositives + falsePositives);
+    recall(i) = truePositives / (truePositives + falseNegatives);
+    f1Score(i) = 2 * (precision(i) * recall(i)) / (precision(i) + recall(i));
+end
+
+% Average precision, recall, and F1 score
+avgPrecision = mean(precision);
+avgRecall = mean(recall);
+avgF1Score = mean(f1Score);
+% Plot confusion matrix
+figure;
+confusionchart(confMat);
+
+% Calculate test accuracy
+testAccuracy = sum(diag(confMat)) / sum(confMat, 'all');
+disp('Test Accuracy:');
+disp(testAccuracy);
+disp('Precision:');
+disp(precision);
+disp('Recall:');
+disp(recall);
+disp('F1 Score:');
+disp(f1Score);
+disp('Average Precision:');
+disp(avgPrecision);
+disp('Average Recall:');
+disp(avgRecall);
+disp('Average F1 Score:');
+disp(avgF1Score);
